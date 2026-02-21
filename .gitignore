@@ -1,0 +1,16 @@
+# Compiler
+out/
+cache/
+broadcast/
+
+# Node (if added later)
+node_modules/
+
+# Env
+.env
+.env.local
+
+# IDE
+.idea/
+*.swp
+*.swo
