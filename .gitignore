@@ -3,8 +3,16 @@ out/
 cache/
 broadcast/
 
-# Node (if added later)
+# Node
 node_modules/
+
+# Hardhat
+cache_hardhat/
+artifacts/
+coverage/
+coverage.json
+typechain-types/
+typechain-types.d.ts
 
 # Env
 .env

@@ -4,42 +4,43 @@ pragma solidity ^0.8.20;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {IEventMarket} from "./interfaces/IEventMarket.sol";
 import {EventPerpMath} from "./libraries/EventPerpMath.sol";
+import {EIP712Initializable} from "./upgradeable/EIP712Initializable.sol";
 
-/// @title EventMarket
-/// @notice Per-event perpetual market: margin, positions, order-book settlement, liquidation, funding, resolution
-contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
+/// @title EventMarket (Upgradeable)
+/// @notice Per-event perpetual market behind BeaconProxy; use initialize() for proxy init
+contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard, EIP712Initializable {
     using SafeERC20 for IERC20;
 
     bytes32 public constant ORDER_TYPEHASH = keccak256(
         "Order(address maker,uint256 price,uint256 size,bool isLong,uint256 nonce,uint256 expiry)"
     );
 
-    IERC20 public immutable collateral;
+    IERC20 public collateral;
     address public factory;
     uint256 public eventId;
 
     uint256 public constant PRECISION = 1e18;
-    uint256 public maxLeverage = 5; // 5x
-    uint256 public initialMarginBps = 2000; // 20%
-    uint256 public maintenanceMarginBps = 1000; // 10%
-    uint256 public makerFeeBps = 2; // 0.02%
-    uint256 public takerFeeBps = 5; // 0.05%
-    uint256 public liquidationPenaltyBps = 500; // 5%
-    uint256 public liquidatorRewardBps = 200; // 2%
+    uint256 public maxLeverage = 5;
+    uint256 public initialMarginBps = 2000;
+    uint256 public maintenanceMarginBps = 1000;
+    uint256 public makerFeeBps = 2;
+    uint256 public takerFeeBps = 5;
+    uint256 public liquidationPenaltyBps = 500;
+    uint256 public liquidatorRewardBps = 200;
 
-    uint256 public markPrice; // 0 to PRECISION (probability)
-    uint256 public indexPrice; // oracle/index for funding
-    uint256 public fundingIndex; // cumulative funding
+    uint256 public markPrice;
+    uint256 public indexPrice;
+    uint256 public fundingIndex;
     uint256 public lastFundingTime;
     uint256 public fundingPeriod = 1 hours;
 
     uint256 public insuranceFund;
     bool public resolved;
-    bool public outcome; // true = 1, false = 0
+    bool public outcome;
 
     mapping(address => uint256) public collateralBalance;
     mapping(address => Position) public positions;
@@ -76,11 +77,18 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
         _;
     }
 
-    constructor(address _collateral, address _factory, uint256 _eventId) EIP712("EventPerpetual", "1") {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address _collateral, address _factory, uint256 _eventId) external initializer {
         collateral = IERC20(_collateral);
         factory = _factory;
         eventId = _eventId;
         lastFundingTime = block.timestamp;
+        fundingPeriod = 1 hours;
+        __EIP712_init_unchained("EventPerpetual", "1");
     }
 
     // ─────────── Margin Engine ───────────
@@ -103,7 +111,6 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
         emit Withdraw(msg.sender, amount);
     }
 
-    /// @dev Equity = collateral + unrealized PnL (mark-to-market)
     function getEquity(address trader) public view returns (uint256) {
         uint256 col = collateralBalance[trader];
         Position memory pos = positions[trader];
@@ -119,12 +126,10 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
         return col > uint256(-uPnL) ? col - uint256(-uPnL) : 0;
     }
 
-    /// @dev Initial margin required to open: notional / leverage
     function getInitialMarginRequired(uint256 size, uint256 price) public view returns (uint256) {
         return (size * price * initialMarginBps) / (PRECISION * 10000);
     }
 
-    /// @dev Maintenance margin: equity must stay above this
     function getMaintenanceMargin(uint256 size, uint256 price) public view returns (uint256) {
         return (size * price * maintenanceMarginBps) / (PRECISION * 10000);
     }
@@ -143,7 +148,7 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
         if (equity < maint) revert InsufficientMargin();
     }
 
-    // ─────────── Order Book Settlement (off-chain match + on-chain verify) ───────────
+    // ─────────── Order Book Settlement ───────────
 
     struct Order {
         address maker;
@@ -182,8 +187,6 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
         );
     }
 
-    /// @param makerOrder abi-encoded (maker, price, size, isLong, nonce, expiry)
-    /// @param signature ECDSA signature (r,s,v) of hashOrder(Order)
     function submitFill(
         address taker,
         bool takerIsLong,
@@ -204,7 +207,7 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
         ) = abi.decode(makerOrder, (address, uint256, uint256, uint256, uint256, uint256));
         bool makerLong = makerLongU != 0;
         if (block.timestamp > expiry) revert OrderExpired();
-        if (takerIsLong == makerLong) revert InvalidSize(); // must be opposite side
+        if (takerIsLong == makerLong) revert InvalidSize();
         uint256 fillSize = size <= makerSize ? size : makerSize;
         if (takerIsLong && makerPrice > price) revert InvalidPrice();
         if (!takerIsLong && makerPrice < price) revert InvalidPrice();
@@ -226,7 +229,6 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
         _executeFill(taker, takerIsLong, maker, makerLong, price, fillSize);
     }
 
-    /// @dev Simple on-chain fill: two parties (taker long vs maker short or vice versa) at one price/size
     function _executeFill(
         address taker,
         bool takerLong,
@@ -235,7 +237,6 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
         uint256 price,
         uint256 size
     ) internal {
-        // Update positions
         _updatePosition(taker, takerLong, price, size, true);
         _updatePosition(maker, makerLong, price, size, true);
 
@@ -246,7 +247,7 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
         collateralBalance[maker] -= makerFee;
         insuranceFund += takerFee + makerFee;
 
-        markPrice = price; // simple: last trade = mark (in production use TWAP or mid)
+        markPrice = price;
         emit Fill(taker, maker, takerLong, price, size);
     }
 
@@ -261,7 +262,6 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
             pos.entryPrice = (pos.entryPrice * pos.size + price * size) / (pos.size + size);
             pos.size += size;
         } else {
-            // Reducing or closing: opposite side — realize PnL on the closed amount
             uint256 closeSize = size >= pos.size ? pos.size : size;
             int256 rPnL = EventPerpMath.pnl(
                 pos.isLong ? int256(closeSize) : -int256(closeSize),
@@ -312,7 +312,7 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
         if (fromTrader >= reward) {
             insuranceFund += (fromTrader - reward);
         } else {
-            insuranceFund -= (reward - fromTrader); // insurance covers liquidator reward shortfall
+            insuranceFund -= (reward - fromTrader);
         }
 
         delete positions[trader];
@@ -331,7 +331,6 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
         if (elapsed < fundingPeriod) return;
         uint256 periods = elapsed / fundingPeriod;
         lastFundingTime += periods * fundingPeriod;
-        // funding rate = (mark - index) per period; longs pay shorts if mark > index
         int256 rate = int256(markPrice) - int256(indexPrice);
         fundingIndex += uint256(rate * int256(periods));
         emit FundingUpdated(fundingIndex, rate);
@@ -340,7 +339,6 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
     function settleFunding(address trader) internal {
         Position storage pos = positions[trader];
         if (pos.size == 0) return;
-        // funding payment = size * (currentIndex - lastIndex) / PRECISION; long pays when index rises
         int256 accrued = (int256(fundingIndex) - int256(pos.lastFundingIndex)) * int256(pos.size) / int256(PRECISION);
         if (pos.isLong) {
             if (accrued > 0) collateralBalance[trader] -= uint256(accrued);
@@ -361,7 +359,6 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
         emit Resolved(_outcome);
     }
 
-    /// @dev After resolution, traders can settle and withdraw
     function settleAndWithdraw() external nonReentrant {
         if (!resolved) revert EventResolved();
         Position memory pos = positions[msg.sender];
@@ -384,10 +381,7 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
         collateralBalance[msg.sender] = 0;
     }
 
-    // ─────────── View helpers ───────────
-
     function getOpenInterest() external pure returns (uint256 longOi, uint256 shortOi) {
-        // Track in state or iterate positions for full OI; stub for interface
         return (0, 0);
     }
 }

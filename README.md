@@ -1,5 +1,13 @@
 # Event Perpetuals
 
+EventMarketUpgradeable impl: 0x76A6b904b05633d00415E31Ec7373b27fcDBd847
+Market Beacon: 0xF0A7f29F5F7278339Af058F33f188C26A6F0765a
+EventFactoryUpgradeable impl: 0x2f697DD5247f58982D79a6a0E3d50f81cE9C89E7
+EventFactory proxy (use this): 0xE7bdA6634dC55F68e9a878fdf29C4b34DE2d2a03
+
+
+
+
 On-chain **event perpetual** order-book protocol: trade probability (0–1) of binary events with margin, funding, and oracle resolution.
 
 - **Price = probability** (e.g. 0.65 = 65% implied chance)
@@ -293,11 +301,112 @@ So the full path is: **deposit → open long (submitFill buy) → mark moves up 
 
 ## Build & test
 
+**Foundry:**
 ```bash
-# Install deps (OpenZeppelin already via forge install)
 forge build
 forge test
 ```
+
+**Hardhat** (for compile + deploy):
+```bash
+npm install
+npx hardhat compile
+```
+
+---
+
+## Deploy (Hardhat)
+
+Deployment uses **Hardhat**. Set `.env` with `SEPOLIA_RPC_URL` and `PRIVATE_KEY`. Optional: `COLLATERAL`, `ADMIN` (defaults: collateral `0x799a5570318c0C5Fcfd09b0f573335B5aa8d85Ff`, admin = deployer).
+
+**Deploy upgradeable contracts to Sepolia:**
+```bash
+npm run deploy:sepolia
+# or
+npx hardhat run scripts/deploy-upgradeable.js --network sepolia
+```
+
+After a successful deploy, **`deploy-addresses.sepolia.json`** is written with `chainId`, `collateral`, `eventFactoryProxy`, `marketBeacon`, and implementation addresses. Use **`eventFactoryProxy`** as the factory address in your frontend.
+
+### Which address is which?
+
+| What you need | JSON key | Meaning |
+|---------------|----------|--------|
+| **EventFactoryUpgradeable (use this)** | `eventFactoryProxy` | The factory you call: `createEvent()`, `resolveEvent()`, `getEvent()`, etc. This is the **proxy**; use it in the frontend. |
+| EventFactoryUpgradeable (logic only) | `eventFactoryImplementation` | Implementation contract; used for upgrades, not for normal calls. |
+| **EventMarketUpgradeable (logic only)** | `eventMarketImplementation` | Single implementation for all event markets. Not a “market” by itself. |
+| Each event market | from `factory.createEvent()` | Each event has its **own** market address (a BeaconProxy). Call `createEvent(...)` and use the returned `market` address for that event (deposit, submitFill, etc.). |
+
+So: **EventFactoryUpgradeable contract address** = **`eventFactoryProxy`**. **EventMarketUpgradeable** has one shared **implementation** address = **`eventMarketImplementation`**; each **event market** address comes from **`factory.createEvent()`** (different per event).
+
+### Verify on Sepolia Etherscan
+
+Add **`ETHERSCAN_API_KEY`** to `.env` (get one at [etherscan.io/myapikey](https://etherscan.io/myapikey)).
+
+**Option A – Verify all (run after deploy):**
+```bash
+npx hardhat run scripts/verify-sepolia.js --network sepolia
+```
+
+**Option B – Verify one by one:** (replace `YOUR_ADMIN_ADDRESS` with the admin/deployer address used when you deployed)
+```bash
+# EventMarketUpgradeable implementation (no constructor args)
+npx hardhat verify --network sepolia 0x76A6b904b05633d00415E31Ec7373b27fcDBd847
+
+# UpgradeableBeacon (beaconAddress, implementation, owner) — 2 args: implementation, owner
+npx hardhat verify --network sepolia 0xF0A7f29F5F7278339Af058F33f188C26A6F0765a 0x76A6b904b05633d00415E31Ec7373b27fcDBd847 YOUR_ADMIN_ADDRESS
+
+# EventFactoryUpgradeable implementation (no constructor args)
+npx hardhat verify --network sepolia 0x2f697DD5247f58982D79a6a0E3d50f81cE9C89E7
+
+# Factory proxy needs encoded initData; use "npm run verify:sepolia" for the proxy.
+```
+
+Use addresses from your **`deploy-addresses.sepolia.json`** if you redeployed (they will differ). For UpgradeableBeacon, `YOUR_ADMIN_ADDRESS` is the same as the deployer/admin (e.g. `0xf69F75EB0c72171AfF58D79973819B6A3038f39f` if that was your deployer).
+
+---
+
+## Upgradeable contracts
+
+The protocol can be deployed in an **upgradeable** way so that factory and market logic can be upgraded without migrating state.
+
+### Layout
+
+| Contract | Role | Upgrade mechanism |
+|----------|------|-------------------|
+| **EventFactoryUpgradeable** | Factory logic | UUPS proxy: upgrade via `upgradeToAndCall(newImpl, data)` (admin only) |
+| **EventMarketUpgradeable** | Market logic for all events | Beacon: one implementation, many proxies; upgrade via `UpgradeableBeacon.upgradeTo(newImpl)` (beacon owner) |
+
+- **Factory**: Use an **ERC1967Proxy** pointing to `EventFactoryUpgradeable`. Call `initialize(collateral, admin, marketBeacon)` in the proxy constructor. Interact with the **proxy** address as the factory. Only **admin** can call `upgradeToAndCall` to point the proxy to a new factory implementation.
+- **Markets**: Each event is a **BeaconProxy** that delegatecalls to the implementation set in **UpgradeableBeacon**. Deploy one `EventMarketUpgradeable` implementation, deploy a **Beacon(implementation, owner)**. Factory’s `createEvent` deploys `new BeaconProxy(beacon, initData)` and passes `EventMarketUpgradeable.initialize(collateral, factory, eventId)` as `initData`. To upgrade **all** markets at once, the beacon owner calls `beacon.upgradeTo(newEventMarketImpl)`.
+
+### Deploy (upgradeable)
+
+Use **Hardhat** (see **Deploy (Hardhat)** above) or **Foundry**:
+
+1. Deploy **EventMarketUpgradeable** (implementation, no state).
+2. Deploy **UpgradeableBeacon**(marketImpl, admin).
+3. Deploy **EventFactoryUpgradeable** (implementation).
+4. Deploy **ERC1967Proxy**(factoryImpl, initialize(collateral, admin, beacon)).
+5. Use **address(proxy)** as the factory.
+
+**Foundry** (optional): `./script/deploy-sepolia.sh` or `forge script script/DeployUpgradeable.s.sol:DeployUpgradeableScript --rpc-url $SEPOLIA_RPC_URL --broadcast`
+
+### Upgrade
+
+- **Upgrade factory**: Deploy new `EventFactoryUpgradeable` impl, then as admin call `factory.upgradeToAndCall(newFactoryImpl, "")`. Existing event IDs and market addresses are unchanged; only factory logic (e.g. access control, createEvent) changes.
+- **Upgrade all markets**: Deploy new `EventMarketUpgradeable` impl, then as beacon owner call `beacon.upgradeTo(newMarketImpl)`. Every BeaconProxy (each event market) will use the new implementation on the next call. **Do not change storage layout** between versions (append only, or use a storage gap).
+
+### Files
+
+- `src/EventFactoryUpgradeable.sol` — UUPS-upgradeable factory; creates markets via BeaconProxy.
+- `src/EventMarketUpgradeable.sol` — Market implementation for BeaconProxy; use `initialize()` (no constructor state).
+- `src/upgradeable/EIP712Initializable.sol` — EIP-712 domain for upgradeable market (set in initializer).
+- **Hardhat**: `scripts/deploy-upgradeable.js` — Deploy script; writes `deploy-addresses.sepolia.json`.
+- **Foundry**: `script/DeployUpgradeable.s.sol`, `script/deploy-sepolia.sh`.
+- `test/EventPerpetualUpgradeable.t.sol` — Foundry tests for upgradeable flow.
+
+Non-upgradeable versions remain: **EventFactory** and **EventMarket** (constructor-based, for simple deployments).
 
 ---
 
