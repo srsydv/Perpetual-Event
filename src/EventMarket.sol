@@ -261,6 +261,17 @@ contract EventMarket is IEventMarket, ReentrancyGuard, EIP712 {
             pos.entryPrice = (pos.entryPrice * pos.size + price * size) / (pos.size + size);
             pos.size += size;
         } else {
+            // Reducing or closing: opposite side — realize PnL on the closed amount
+            uint256 closeSize = size >= pos.size ? pos.size : size;
+            int256 rPnL = EventPerpMath.pnl(
+                pos.isLong ? int256(closeSize) : -int256(closeSize),
+                pos.entryPrice,
+                price,
+                pos.isLong
+            );
+            if (rPnL > 0) collateralBalance[trader] += uint256(rPnL);
+            else collateralBalance[trader] -= uint256(-rPnL);
+
             if (size >= pos.size) {
                 pos.size = size - pos.size;
                 pos.entryPrice = price;
