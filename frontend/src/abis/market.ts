@@ -1,0 +1,28 @@
+export const EVENT_MARKET_ABI = [
+  { inputs: [{ name: "amount", type: "uint256" }], name: "deposit", outputs: [], stateMutability: "nonpayable", type: "function" },
+  { inputs: [{ name: "amount", type: "uint256" }], name: "withdraw", outputs: [], stateMutability: "nonpayable", type: "function" },
+  { inputs: [{ name: "trader", type: "address" }], name: "collateralBalance", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" },
+  { inputs: [{ name: "trader", type: "address" }], name: "getPosition", outputs: [{ components: [{ name: "size", type: "uint256" }, { name: "entryPrice", type: "uint256" }, { name: "isLong", type: "bool" }, { name: "lastFundingIndex", type: "uint256" }], name: "", type: "tuple" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "getMarkPrice", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "resolved", outputs: [{ name: "", type: "bool" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "outcome", outputs: [{ name: "", type: "bool" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "collateral", outputs: [{ name: "", type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "eventId", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" },
+  { inputs: [{ name: "trader", type: "address" }], name: "getEquity", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" },
+  { inputs: [{ name: "trader", type: "address" }], name: "nonces", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" },
+  {
+    inputs: [
+      { name: "taker", type: "address" },
+      { name: "takerIsLong", type: "bool" },
+      { name: "price", type: "uint256" },
+      { name: "size", type: "uint256" },
+      { name: "makerOrder", type: "bytes" },
+      { name: "signature", type: "bytes" },
+    ],
+    name: "submitFill",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  { inputs: [], name: "settleAndWithdraw", outputs: [], stateMutability: "nonpayable", type: "function" },
+] as const;
