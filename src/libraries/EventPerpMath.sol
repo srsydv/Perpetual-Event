@@ -14,9 +14,17 @@ library EventPerpMath {
     function pnl(int256 size, uint256 entryPrice, uint256 exitPrice, bool isLong) internal pure returns (int256) {
         if (size == 0) return 0;
         if (isLong) {
-            return int256((uint256(size) * (exitPrice - entryPrice)) / PRECISION);
+            if (exitPrice >= entryPrice) {
+                return int256((uint256(size) * (exitPrice - entryPrice)) / PRECISION);
+            } else {
+                return -int256((uint256(size) * (entryPrice - exitPrice)) / PRECISION);
+            }
         } else {
-            return int256((uint256(-size) * (entryPrice - exitPrice)) / PRECISION);
+            if (entryPrice >= exitPrice) {
+                return int256((uint256(-size) * (entryPrice - exitPrice)) / PRECISION);
+            } else {
+                return -int256((uint256(-size) * (exitPrice - entryPrice)) / PRECISION);
+            }
         }
     }
 

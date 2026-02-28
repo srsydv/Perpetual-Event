@@ -185,4 +185,61 @@ contract EventPerpetualUpgradeableTest is Test {
         assertEq(m.collateralBalance(alice), amount - amount / 2);
         vm.stopPrank();
     }
+
+    function test_Revert_WithdrawInsufficientCollateral() public {
+        vm.prank(admin);
+        (, address market) = factory.createEvent("Test", block.timestamp + 1 days, oracle);
+        EventMarketUpgradeable m = EventMarketUpgradeable(payable(market));
+        vm.startPrank(alice);
+        usdc.approve(market, 1000 * 1e6);
+        m.deposit(1000 * 1e6);
+        vm.expectRevert(EventMarketUpgradeable.InsufficientCollateral.selector);
+        m.withdraw(1001 * 1e6);
+        vm.stopPrank();
+    }
+
+    function test_Revert_ResolveTwice() public {
+        vm.prank(admin);
+        factory.createEvent("Test", block.timestamp + 1 days, oracle);
+        vm.prank(admin);
+        factory.resolveEvent(0, true);
+        vm.expectRevert();
+        vm.prank(admin);
+        factory.resolveEvent(0, false);
+    }
+
+    function test_Revert_SettleBeforeResolve() public {
+        vm.prank(admin);
+        (, address market) = factory.createEvent("Test", block.timestamp + 1 days, oracle);
+        EventMarketUpgradeable m = EventMarketUpgradeable(payable(market));
+        vm.startPrank(alice);
+        usdc.approve(market, 1000 * 1e6);
+        m.deposit(1000 * 1e6);
+        vm.expectRevert(EventMarketUpgradeable.EventResolved.selector);
+        m.settleAndWithdraw();
+        vm.stopPrank();
+    }
+
+    function test_Revert_LiquidateNoPosition() public {
+        vm.prank(admin);
+        (, address market) = factory.createEvent("Test", block.timestamp + 1 days, oracle);
+        EventMarketUpgradeable m = EventMarketUpgradeable(payable(market));
+        vm.prank(alice);
+        usdc.approve(market, 1000 * 1e6);
+        vm.prank(alice);
+        m.deposit(1000 * 1e6);
+        vm.expectRevert(EventMarketUpgradeable.NotLiquidatable.selector);
+        m.liquidate(alice);
+    }
+
+    function test_GetInitialAndMaintenanceMargin() public {
+        vm.prank(admin);
+        (, address market) = factory.createEvent("Test", block.timestamp + 1 days, oracle);
+        EventMarketUpgradeable m = EventMarketUpgradeable(payable(market));
+        uint256 size = 100 * 1e6;
+        uint256 price = 0.6e18;
+        uint256 init = m.getInitialMarginRequired(size, price);
+        uint256 maint = m.getMaintenanceMargin(size, price);
+        assertGe(init, maint, "initial margin should be >= maintenance");
+    }
 }
