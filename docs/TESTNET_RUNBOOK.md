@@ -75,3 +75,28 @@ Steps performed: create event (if none), approve + deposit (maker and taker), si
 ## Rollback (upgrade)
 
 To roll back to a previous implementation: deploy the **old** implementation again (or use a known address), then run the upgrade script with that address, or call `beacon.upgradeTo(oldImpl)` and `factory.upgradeToAndCall(oldFactoryImpl, "0x")` as admin. Ensure storage layout is compatible.
+
+---
+
+## Matcher / indexer / index publisher
+
+### Matcher API
+
+- **Start**: From `matcher/`: `npm run migrate` (once), then `PORT=3001 npm start`. Requires PostgreSQL (`DATABASE_URL` or `PG_*`); optional Redis for idempotency.
+- **Health**: `GET /health` returns `{ ok, db, redis }`; use for liveness/readiness. Return 503 if DB is down.
+- **Internal routes**: Set `MATCHER_INTERNAL_SECRET` or `MATCHER_API_KEY` and send `X-Internal-Secret` or `Authorization: Bearer <key>` for `/apply-fill` and `/invalidate-nonce`.
+
+### Indexer and reconciler
+
+- **Run once or cron**: `RPC_URL=... MARKET_ADDRESSES=0x...,0x... node reconcile.js` (runs indexer then applies chain cancels to matcher book). Optional `FINALITY_BLOCKS=12`.
+- **Reorg**: Indexer only processes blocks within finality window; on block hash mismatch it rolls back and replays.
+
+### Index publisher
+
+- **Dry run**: `MATCHER_BASE_URL=http://localhost:3001 MARKET_ADDRESS=0x... node run-index-publisher.js` (logs to DB, no on-chain call).
+- **Live**: Set `FACTORY_ADDRESS`, `EVENT_ID`, `PRIVATE_KEY` (oracle/admin), `DRY_RUN=false`. Uses `KILL_SWITCH=true` to disable publishing.
+
+### Deployment and rollback (matcher)
+
+- **Blue/green**: Run two matcher instances behind a load balancer; switch traffic for zero-downtime deploy. DB and Redis are shared; ensure migrations are backward-compatible.
+- **Rollback**: Point traffic back to previous matcher version; no DB rollback needed if schema is additive.

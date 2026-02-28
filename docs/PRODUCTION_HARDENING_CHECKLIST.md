@@ -25,8 +25,12 @@ Use this checklist before mainnet or production testnet launch.
 
 - [ ] Order schema and signature verification match contract (EIP-712, typehash, domain).
 - [ ] Matcher enforces opposite side, price bounds, size <= remaining, nonce/expiry.
-- [ ] Indexer reconciles with chain (Fill, OrderCanceled); stale orders disabled.
+- [ ] Matcher uses PostgreSQL + optional Redis; idempotency keys on mutating endpoints; rate limits and internal auth on /apply-fill, /invalidate-nonce.
+- [ ] Indexer runs block-by-block with finality window; reorg-safe (rollback and replay).
+- [ ] Reconciler applies chain_cancels to matcher book; /trades served from chain_fills.
+- [ ] Index publisher: guardrails (staleness, max delta, kill-switch); all publishes logged; dry-run before live.
 - [ ] simulate-fill and /book APIs return correct data for frontend.
+- [ ] GET /health checks DB (and optional Redis); returns 503 if DB down.
 
 ## Frontend / UX
 

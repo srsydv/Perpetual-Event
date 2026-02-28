@@ -6,10 +6,16 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "reconcile": "node reconcile.js"
+    "migrate": "node src/db/migrate.js",
+    "reconcile": "node reconcile.js",
+    "index": "node run-indexer.js",
+    "index-publish": "node run-index-publisher.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "ethers": "^6.0.0",
-    "express": "^4.18.0"
+    "express": "^4.18.0",
+    "pg": "^8.11.0",
+    "ioredis": "^5.3.0"
   }
 }
