@@ -44,4 +44,27 @@ export const EVENT_FACTORY_ABI = [
     stateMutability: "nonpayable",
     type: "function",
   },
+  {
+    inputs: [{ name: "eventId", type: "uint256" }, { name: "indexPrice", type: "uint256" }],
+    name: "setMarketIndexPrice",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "eventId", type: "uint256" }, { name: "alphaBps", type: "uint256" }, { name: "maxDeviationBps", type: "uint256" }],
+    name: "setMarketMicrostructure",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "eventId", type: "uint256" }, { name: "closeOnly", type: "bool" }],
+    name: "setMarketCloseOnly",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  { inputs: [{ name: "eventId", type: "uint256" }], name: "pauseEvent", outputs: [], stateMutability: "nonpayable", type: "function" },
+  { inputs: [{ name: "eventId", type: "uint256" }], name: "unpauseEvent", outputs: [], stateMutability: "nonpayable", type: "function" },
 ] as const;

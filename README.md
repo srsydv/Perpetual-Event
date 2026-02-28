@@ -1,12 +1,41 @@
 # Event Perpetuals
 
-EventMarketUpgradeable impl: 0x76A6b904b05633d00415E31Ec7373b27fcDBd847
-Market Beacon: 0xF0A7f29F5F7278339Af058F33f188C26A6F0765a
-EventFactoryUpgradeable impl: 0x2f697DD5247f58982D79a6a0E3d50f81cE9C89E7
-EventFactory proxy (use this): 0xE7bdA6634dC55F68e9a878fdf29C4b34DE2d2a03
+**Sepolia (current):**
 
+| Contract | Address |
+|----------|---------|
+| EventFactory **proxy** (use this) | `0xE7bdA6634dC55F68e9a878fdf29C4b34DE2d2a03` |
+| EventFactory implementation | `0x726F93C0A512D539F6Ff693423287d55257c84C3` |
+| Market Beacon | `0xF0A7f29F5F7278339Af058F33f188C26A6F0765a` |
+| EventMarket implementation | `0x4Cc55Efaf1540E4315ED2b308dE51e2375Ef4c40` |
 
+**Upgrading (same proxy/beacon addresses):**  
+Deploy new implementations and point proxy/beacon to them so the app keeps using the same factory and market addresses. From repo root (with `.env` set: `SEPOLIA_RPC_URL`, `PRIVATE_KEY` for the **admin** account):
 
+```bash
+npx hardhat run scripts/upgrade-sepolia.js --network sepolia
+```
+
+This script reads `deploy-addresses.sepolia.json`, deploys new EventFactory + EventMarket implementations, upgrades the beacon and the factory proxy to them, and updates the JSON. The factory proxy and beacon addresses stay the same; only the implementation addresses change.
+
+**Which addresses to verify (Etherscan):**
+
+| What | Address | Constructor args |
+|------|---------|------------------|
+| EventFactory **proxy** (main entry) | `0xE7bdA6634dC55F68e9a878fdf29C4b34DE2d2a03` | `(implementation, initData)` — use **current** `eventFactoryImplementation` from JSON and `initialize(collateral, admin, marketBeacon)` calldata |
+| EventFactoryUpgradeable **implementation** | From JSON: `eventFactoryImplementation` | None |
+| EventMarketUpgradeable **implementation** | From JSON: `eventMarketImplementation` | None |
+| Market **Beacon** | `0xF0A7f29F5F7278339Af058F33f188C26A6F0765a` | `(implementation, owner)` — use **current** `eventMarketImplementation` from JSON and admin address |
+
+After an **upgrade**, verify only the **new** implementation contracts (so Etherscan has the latest source). The proxy and beacon addresses are unchanged; if you verify the proxy, use the **current** factory implementation address (the one in `deploy-addresses.sepolia.json` after upgrade). Run:
+
+```bash
+npx hardhat run scripts/verify-sepolia.js --network sepolia
+```
+
+**Testnet rollout and runbook:** See [docs/TESTNET_RUNBOOK.md](docs/TESTNET_RUNBOOK.md) for deploy, upgrade, verify, integration script (`scripts/integration-two-wallet.js`), and staged test campaign. Production hardening: [docs/PRODUCTION_HARDENING_CHECKLIST.md](docs/PRODUCTION_HARDENING_CHECKLIST.md).
+
+---
 
 On-chain **event perpetual** order-book protocol: trade probability (0–1) of binary events with margin, funding, and oracle resolution.
 
@@ -81,6 +110,20 @@ Order(address maker,uint256 price,uint256 size,bool isLong,uint256 nonce,uint256
 | Funding period | 1 hour | Funding accrual interval |
 
 Price and probability use **1e18** scale (0 to 1e18).
+
+### Mark microstructure (testing-ready)
+
+To reduce single-trade price jumps, mark is now updated with an EMA + optional index clamp:
+
+- `markEmaAlphaBps` (default `2000`): 20% latest trade, 80% previous mark
+- `maxMarkDeviationBps` (default `3000`): clamp mark within +/-30% of index when index is set
+
+Admin can tune this per event market through factory:
+
+- `setMarketMicrostructure(eventId, alphaBps, maxDeviationBps)`
+- `setMarketIndexPrice(eventId, indexPrice)` to enable effective clamping
+
+This keeps perpetual behavior while making mark less manipulable than pure last-trade pricing.
 
 ---
 
@@ -351,13 +394,13 @@ npx hardhat run scripts/verify-sepolia.js --network sepolia
 **Option B – Verify one by one:** (replace `YOUR_ADMIN_ADDRESS` with the admin/deployer address used when you deployed)
 ```bash
 # EventMarketUpgradeable implementation (no constructor args)
-npx hardhat verify --network sepolia 0x76A6b904b05633d00415E31Ec7373b27fcDBd847
+npx hardhat verify --network sepolia 0x4Cc55Efaf1540E4315ED2b308dE51e2375Ef4c40
 
 # UpgradeableBeacon (beaconAddress, implementation, owner) — 2 args: implementation, owner
-npx hardhat verify --network sepolia 0xF0A7f29F5F7278339Af058F33f188C26A6F0765a 0x76A6b904b05633d00415E31Ec7373b27fcDBd847 YOUR_ADMIN_ADDRESS
+npx hardhat verify --network sepolia 0xF0A7f29F5F7278339Af058F33f188C26A6F0765a 0x4Cc55Efaf1540E4315ED2b308dE51e2375Ef4c40 YOUR_ADMIN_ADDRESS
 
 # EventFactoryUpgradeable implementation (no constructor args)
-npx hardhat verify --network sepolia 0x2f697DD5247f58982D79a6a0E3d50f81cE9C89E7
+npx hardhat verify --network sepolia 0x726F93C0A512D539F6Ff693423287d55257c84C3
 
 # Factory proxy needs encoded initData; use "npm run verify:sepolia" for the proxy.
 ```

@@ -1,12 +1,13 @@
 import { useParams } from "react-router-dom";
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { parseUnits, formatUnits } from "viem";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DEPLOYED, PRECISION } from "@/config";
 import { EVENT_FACTORY_ABI } from "@/abis/factory";
 import { EVENT_MARKET_ABI } from "@/abis/market";
 import { ERC20_ABI } from "@/abis/erc20";
 import TradePanel from "@/components/TradePanel";
+import OrderBook from "@/components/OrderBook";
 
 export default function Market() {
   const { eventId } = useParams<{ eventId: string }>();
@@ -50,7 +51,7 @@ export default function Market() {
     abi: ERC20_ABI,
     functionName: "decimals",
   });
-  const { data: allowance } = useReadContract({
+  const { data: allowance, refetch: refetchAllowance } = useReadContract({
     address: DEPLOYED.collateral,
     abi: ERC20_ABI,
     functionName: "allowance",
@@ -64,9 +65,14 @@ export default function Market() {
   const { writeContract: deposit, data: depositHash } = useWriteContract();
   const { writeContract: withdraw, data: withdrawHash } = useWriteContract();
 
-  const { isLoading: approvePending } = useWaitForTransactionReceipt({ hash: approveHash });
+  const { isLoading: approvePending, isSuccess: approveSuccess } = useWaitForTransactionReceipt({ hash: approveHash });
   const { isLoading: depositPending } = useWaitForTransactionReceipt({ hash: depositHash });
   const { isLoading: withdrawPending } = useWaitForTransactionReceipt({ hash: withdrawHash });
+
+  // After approve confirms, refetch allowance so Deposit button enables
+  useEffect(() => {
+    if (approveSuccess && refetchAllowance) refetchAllowance();
+  }, [approveSuccess, refetchAllowance]);
 
   const dec = decimals != null ? Number(decimals) : 6;
   const prob = markPrice != null ? Number(markPrice) / PRECISION : 0.5;
@@ -130,6 +136,7 @@ export default function Market() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
+          {marketAddress && <OrderBook marketAddress={marketAddress} />}
           <div className="rounded-xl border border-polymarket-border bg-polymarket-card p-6">
             <h2 className="mb-4 font-medium text-white">Position</h2>
             {pos && pos.size > 0n ? (

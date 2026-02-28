@@ -3,8 +3,10 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {EventFactory} from "../src/EventFactory.sol";
-import {EventMarket} from "../src/EventMarket.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import {EventFactoryUpgradeable} from "../src/EventFactoryUpgradeable.sol";
+import {EventMarketUpgradeable} from "../src/EventMarketUpgradeable.sol";
 import {IEventFactory} from "../src/interfaces/IEventFactory.sol";
 
 contract MockUSDC is ERC20 {
@@ -18,8 +20,9 @@ contract MockUSDC is ERC20 {
 }
 
 contract EventPerpetualTest is Test {
-    EventFactory public factory;
+    EventFactoryUpgradeable public factory;
     MockUSDC public usdc;
+    UpgradeableBeacon public beacon;
 
     address admin = address(1);
     address oracle = address(2);
@@ -28,9 +31,21 @@ contract EventPerpetualTest is Test {
 
     function setUp() public {
         usdc = new MockUSDC();
-        factory = new EventFactory(address(usdc), admin);
         usdc.transfer(alice, 1_000_000 * 1e6);
         usdc.transfer(bob, 1_000_000 * 1e6);
+
+        EventMarketUpgradeable marketImpl = new EventMarketUpgradeable();
+        beacon = new UpgradeableBeacon(address(marketImpl), admin);
+
+        EventFactoryUpgradeable factoryImpl = new EventFactoryUpgradeable();
+        bytes memory initData = abi.encodeWithSelector(
+            EventFactoryUpgradeable.initialize.selector,
+            address(usdc),
+            admin,
+            address(beacon)
+        );
+        ERC1967Proxy proxy = new ERC1967Proxy(address(factoryImpl), initData);
+        factory = EventFactoryUpgradeable(address(proxy));
     }
 
     function test_CreateEvent() public {
@@ -53,7 +68,7 @@ contract EventPerpetualTest is Test {
     function test_DepositWithdraw() public {
         vm.prank(admin);
         (, address market) = factory.createEvent("Test", block.timestamp + 1 days, oracle);
-        EventMarket m = EventMarket(payable(market));
+        EventMarketUpgradeable m = EventMarketUpgradeable(payable(market));
 
         vm.startPrank(alice);
         usdc.approve(market, 1000 * 1e6);
@@ -68,10 +83,10 @@ contract EventPerpetualTest is Test {
     function test_ResolveEvent() public {
         vm.prank(admin);
         (, address market) = factory.createEvent("Test", block.timestamp + 1 days, oracle);
-        EventMarket m = EventMarket(payable(market));
+        EventMarketUpgradeable m = EventMarketUpgradeable(payable(market));
 
         vm.warp(block.timestamp + 1 days + 1);
-        vm.prank(oracle);
+        vm.prank(admin);
         factory.resolveEvent(0, true);
 
         IEventFactory.EventInfo memory e = factory.getEvent(0);

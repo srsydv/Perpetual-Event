@@ -15,8 +15,11 @@ import {EIP712Initializable} from "./upgradeable/EIP712Initializable.sol";
 contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard, EIP712Initializable {
     using SafeERC20 for IERC20;
 
-    bytes32 public constant ORDER_TYPEHASH = keccak256(
+    bytes32 public constant ORDER_TYPEHASH_V1 = keccak256(
         "Order(address maker,uint256 price,uint256 size,bool isLong,uint256 nonce,uint256 expiry)"
+    );
+    bytes32 public constant ORDER_TYPEHASH = keccak256(
+        "Order(address maker,uint256 price,uint256 size,bool isLong,uint256 nonce,uint256 expiry,bytes32 salt)"
     );
 
     IERC20 public collateral;
@@ -31,20 +34,30 @@ contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard,
     uint256 public takerFeeBps = 5;
     uint256 public liquidationPenaltyBps = 500;
     uint256 public liquidatorRewardBps = 200;
+    /// @dev Max fraction of position to liquidate per call in bps (0 = full liquidation only)
+    uint256 public maxLiquidationSizeBps = 0;
 
     uint256 public markPrice;
     uint256 public indexPrice;
+    uint256 public markEmaAlphaBps;
+    uint256 public maxMarkDeviationBps;
     uint256 public fundingIndex;
     uint256 public lastFundingTime;
     uint256 public fundingPeriod = 1 hours;
+    int256 public fundingRateCap = int256(1e17);
+    int256 public fundingRateFloor = -int256(1e17);
 
     uint256 public insuranceFund;
     bool public resolved;
     bool public outcome;
+    /// @dev When true, only reduce/close and withdraw allowed (no new opens)
+    bool public closeOnly;
 
     mapping(address => uint256) public collateralBalance;
     mapping(address => Position) public positions;
     mapping(address => uint256) public nonces;
+    /// @dev V2: filled amount per orderHash for partial fills (orderHash => filled amount)
+    mapping(bytes32 => uint256) public filledAmount;
 
     event Deposit(address indexed user, uint256 amount);
     event Withdraw(address indexed user, uint256 amount);
@@ -54,6 +67,8 @@ contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard,
     event Resolved(bool outcome);
     event MarkPriceUpdated(uint256 markPrice);
     event IndexPriceUpdated(uint256 indexPrice);
+    event MarkMicrostructureUpdated(uint256 alphaBps, uint256 maxDeviationBps);
+    event OrderCanceled(address indexed maker, bytes32 orderHash);
 
     error Unauthorized();
     error EventPaused();
@@ -66,6 +81,9 @@ contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard,
     error OrderExpired();
     error NotLiquidatable();
     error AlreadyResolved();
+    error InvalidConfig();
+    error CloseOnly();
+    error OrderFilledOrCanceled();
 
     modifier onlyFactory() {
         if (msg.sender != factory) revert Unauthorized();
@@ -86,6 +104,8 @@ contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard,
         collateral = IERC20(_collateral);
         factory = _factory;
         eventId = _eventId;
+        markEmaAlphaBps = 2000; // 20% new trade, 80% previous mark
+        maxMarkDeviationBps = 3000; // clamp mark within +/-30% of index when index is set
         lastFundingTime = block.timestamp;
         fundingPeriod = 1 hours;
         __EIP712_init_unchained("EventPerpetual", "1");
@@ -157,6 +177,7 @@ contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard,
         bool isLong;
         uint256 nonce;
         uint256 expiry;
+        bytes32 salt;
     }
 
     function getPosition(address trader) external view returns (Position memory) {
@@ -181,10 +202,30 @@ contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard,
                     order.size,
                     order.isLong,
                     order.nonce,
-                    order.expiry
+                    order.expiry,
+                    order.salt
                 )
             )
         );
+    }
+
+    function hashOrderV1(address maker, uint256 price, uint256 size, bool isLong, uint256 nonce, uint256 expiry)
+        public
+        view
+        returns (bytes32)
+    {
+        return _hashTypedDataV4(
+            keccak256(abi.encode(ORDER_TYPEHASH_V1, maker, price, size, isLong, nonce, expiry))
+        );
+    }
+
+    /// @dev Unique order id for partial fill tracking (maker, price, size, nonce, expiry, salt)
+    function getOrderHash(address maker, uint256 price, uint256 size, uint256 nonce, uint256 expiry, bytes32 salt)
+        public
+        view
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(address(this), maker, price, size, nonce, expiry, salt));
     }
 
     function submitFill(
@@ -195,8 +236,27 @@ contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard,
         bytes calldata makerOrder,
         bytes calldata signature
     ) external nonReentrant whenNotResolved {
-        if (price == 0 || price > PRECISION) revert InvalidPrice();
-        if (size == 0) revert InvalidSize();
+        (
+            address maker,
+            uint256 makerPrice,
+            uint256 makerSize,
+            uint256 makerLongU,
+            uint256 nonce,
+            uint256 expiry,
+            bytes32 salt
+        ) = abi.decode(makerOrder, (address, uint256, uint256, uint256, uint256, uint256, bytes32));
+        _submitFillCore(taker, takerIsLong, price, size, maker, makerPrice, makerSize, makerLongU != 0, nonce, expiry, salt, signature);
+    }
+
+    /// @dev V1 backward compat: 6-param order without salt (single fill, nonce increment)
+    function submitFillV1(
+        address taker,
+        bool takerIsLong,
+        uint256 price,
+        uint256 size,
+        bytes calldata makerOrder,
+        bytes calldata signature
+    ) external nonReentrant whenNotResolved {
         (
             address maker,
             uint256 makerPrice,
@@ -205,28 +265,75 @@ contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard,
             uint256 nonce,
             uint256 expiry
         ) = abi.decode(makerOrder, (address, uint256, uint256, uint256, uint256, uint256));
-        bool makerLong = makerLongU != 0;
+        _submitFillCore(taker, takerIsLong, price, size, maker, makerPrice, makerSize, makerLongU != 0, nonce, expiry, bytes32(0), signature);
+    }
+
+    function _submitFillCore(
+        address taker,
+        bool takerIsLong,
+        uint256 price,
+        uint256 size,
+        address maker,
+        uint256 makerPrice,
+        uint256 makerSize,
+        bool makerLong,
+        uint256 nonce,
+        uint256 expiry,
+        bytes32 salt,
+        bytes calldata signature
+    ) internal {
+        if (closeOnly) revert CloseOnly();
+        if (price == 0 || price > PRECISION) revert InvalidPrice();
+        if (size == 0) revert InvalidSize();
         if (block.timestamp > expiry) revert OrderExpired();
         if (takerIsLong == makerLong) revert InvalidSize();
-        uint256 fillSize = size <= makerSize ? size : makerSize;
+        if (taker == maker) revert InvalidSize();
+
+        uint256 fillSize;
+        if (salt == bytes32(0)) {
+            if (nonces[maker] != nonce) revert InvalidSignature();
+            fillSize = size <= makerSize ? size : makerSize;
+            if (fillSize != makerSize) revert InvalidSize();
+            nonces[maker] = nonce + 1;
+        } else {
+            bytes32 orderHash = getOrderHash(maker, makerPrice, makerSize, nonce, expiry, salt);
+            uint256 alreadyFilled = filledAmount[orderHash];
+            if (alreadyFilled >= makerSize) revert OrderFilledOrCanceled();
+            fillSize = size <= (makerSize - alreadyFilled) ? size : (makerSize - alreadyFilled);
+            if (fillSize == 0) revert InvalidSize();
+            filledAmount[orderHash] = alreadyFilled + fillSize;
+        }
+
         if (takerIsLong && makerPrice > price) revert InvalidPrice();
         if (!takerIsLong && makerPrice < price) revert InvalidPrice();
-        Order memory order = Order({
-            maker: maker,
-            price: makerPrice,
-            size: makerSize,
-            isLong: makerLong,
-            nonce: nonce,
-            expiry: expiry
-        });
-        if (ECDSA.recover(hashOrder(order), bytes(signature)) != maker) revert InvalidSignature();
-        if (nonces[maker] != nonce) revert InvalidSignature();
-        nonces[maker] = nonce + 1;
+        if (salt == bytes32(0)) {
+            if (ECDSA.recover(hashOrderV1(maker, makerPrice, makerSize, makerLong, nonce, expiry), bytes(signature)) != maker) revert InvalidSignature();
+        } else {
+            Order memory order = Order({
+                maker: maker,
+                price: makerPrice,
+                size: makerSize,
+                isLong: makerLong,
+                nonce: nonce,
+                expiry: expiry,
+                salt: salt
+            });
+            if (ECDSA.recover(hashOrder(order), bytes(signature)) != maker) revert InvalidSignature();
+        }
 
         updateFunding();
         settleFunding(taker);
         settleFunding(maker);
         _executeFill(taker, takerIsLong, maker, makerLong, price, fillSize);
+    }
+
+    /// @dev Cancel order (maker only); marks order as fully filled for remaining size
+    function cancelOrder(uint256 price, uint256 size, uint256 nonce, uint256 expiry, bytes32 salt) external {
+        bytes32 orderHash = getOrderHash(msg.sender, price, size, nonce, expiry, salt);
+        uint256 alreadyFilled = filledAmount[orderHash];
+        if (alreadyFilled >= size) revert OrderFilledOrCanceled();
+        filledAmount[orderHash] = size;
+        emit OrderCanceled(msg.sender, orderHash);
     }
 
     function _executeFill(
@@ -247,8 +354,28 @@ contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard,
         collateralBalance[maker] -= makerFee;
         insuranceFund += takerFee + makerFee;
 
-        markPrice = price;
+        _updateMarkPrice(price);
         emit Fill(taker, maker, takerLong, price, size);
+    }
+
+    function _updateMarkPrice(uint256 tradePrice) internal {
+        uint256 nextMark;
+        if (markPrice == 0) {
+            nextMark = tradePrice;
+        } else {
+            uint256 prevWeight = 10000 - markEmaAlphaBps;
+            nextMark = (markPrice * prevWeight + tradePrice * markEmaAlphaBps) / 10000;
+        }
+
+        if (indexPrice > 0 && maxMarkDeviationBps > 0) {
+            uint256 upper = (indexPrice * (10000 + maxMarkDeviationBps)) / 10000;
+            uint256 lower = (indexPrice * (10000 - maxMarkDeviationBps)) / 10000;
+            if (nextMark > upper) nextMark = upper;
+            if (nextMark < lower) nextMark = lower;
+        }
+
+        markPrice = nextMark;
+        emit MarkPriceUpdated(nextMark);
     }
 
     function _updatePosition(address trader, bool isLong, uint256 price, uint256 size, bool /* isIncrease */) internal {
@@ -289,14 +416,20 @@ contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard,
     function liquidate(address trader) external nonReentrant whenNotResolved {
         updateFunding();
         settleFunding(trader);
-        Position memory pos = positions[trader];
+        Position storage pos = positions[trader];
         if (pos.size == 0) revert NotLiquidatable();
         uint256 maint = getMaintenanceMargin(pos.size, pos.entryPrice);
         if (getEquity(trader) >= maint) revert NotLiquidatable();
 
+        uint256 liqSize = pos.size;
+        if (maxLiquidationSizeBps > 0 && maxLiquidationSizeBps < 10000) {
+            liqSize = (pos.size * maxLiquidationSizeBps) / 10000;
+            if (liqSize == 0) liqSize = 1;
+        }
+
         uint256 closePrice = markPrice;
         int256 pnl = EventPerpMath.pnl(
-            pos.isLong ? int256(pos.size) : -int256(pos.size),
+            pos.isLong ? int256(liqSize) : -int256(liqSize),
             pos.entryPrice,
             closePrice,
             pos.isLong
@@ -304,7 +437,7 @@ contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard,
         if (pnl > 0) collateralBalance[trader] += uint256(pnl);
         else collateralBalance[trader] -= uint256(-pnl);
 
-        uint256 penalty = (pos.size * pos.entryPrice * liquidationPenaltyBps) / (PRECISION * 10000);
+        uint256 penalty = (liqSize * pos.entryPrice * liquidationPenaltyBps) / (PRECISION * 10000);
         uint256 reward = (penalty * liquidatorRewardBps) / (liquidationPenaltyBps);
         uint256 fromTrader = penalty <= collateralBalance[trader] ? penalty : collateralBalance[trader];
         collateralBalance[trader] -= fromTrader;
@@ -315,8 +448,12 @@ contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard,
             insuranceFund -= (reward - fromTrader);
         }
 
-        delete positions[trader];
-        emit Liquidate(trader, msg.sender, pos.size, penalty);
+        if (liqSize >= pos.size) {
+            delete positions[trader];
+        } else {
+            pos.size -= liqSize;
+        }
+        emit Liquidate(trader, msg.sender, liqSize, penalty);
     }
 
     // ─────────── Funding Engine ───────────
@@ -326,12 +463,36 @@ contract EventMarketUpgradeable is IEventMarket, Initializable, ReentrancyGuard,
         emit IndexPriceUpdated(_indexPrice);
     }
 
+    function setMarkMicrostructure(uint256 _alphaBps, uint256 _maxDeviationBps) external onlyFactory {
+        if (_alphaBps == 0 || _alphaBps > 10000) revert InvalidConfig();
+        if (_maxDeviationBps > 10000) revert InvalidConfig();
+        markEmaAlphaBps = _alphaBps;
+        maxMarkDeviationBps = _maxDeviationBps;
+        emit MarkMicrostructureUpdated(_alphaBps, _maxDeviationBps);
+    }
+
+    function setCloseOnly(bool _closeOnly) external onlyFactory {
+        closeOnly = _closeOnly;
+    }
+
+    function setFundingRateCaps(int256 _fundingRateCap, int256 _fundingRateFloor) external onlyFactory {
+        fundingRateCap = _fundingRateCap;
+        fundingRateFloor = _fundingRateFloor;
+    }
+
+    function setMaxLiquidationSizeBps(uint256 _maxLiquidationSizeBps) external onlyFactory {
+        if (_maxLiquidationSizeBps > 10000) revert InvalidConfig();
+        maxLiquidationSizeBps = _maxLiquidationSizeBps;
+    }
+
     function updateFunding() public whenNotResolved {
         uint256 elapsed = block.timestamp - lastFundingTime;
         if (elapsed < fundingPeriod) return;
         uint256 periods = elapsed / fundingPeriod;
         lastFundingTime += periods * fundingPeriod;
         int256 rate = int256(markPrice) - int256(indexPrice);
+        if (rate > fundingRateCap) rate = fundingRateCap;
+        if (rate < fundingRateFloor) rate = fundingRateFloor;
         fundingIndex += uint256(rate * int256(periods));
         emit FundingUpdated(fundingIndex, rate);
     }

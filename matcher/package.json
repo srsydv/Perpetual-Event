@@ -1,0 +1,15 @@
+{
+  "name": "event-perp-matcher",
+  "version": "1.0.0",
+  "description": "Off-chain order book matcher and indexer API for Event Perpetuals V2",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "reconcile": "node reconcile.js"
+  },
+  "dependencies": {
+    "ethers": "^6.0.0",
+    "express": "^4.18.0"
+  }
+}

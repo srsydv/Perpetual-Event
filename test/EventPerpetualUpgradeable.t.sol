@@ -27,10 +27,14 @@ contract EventPerpetualUpgradeableTest is Test {
     address admin = address(1);
     address oracle = address(2);
     address alice = address(3);
+    address bob = address(4);
+
+    uint256 constant PRECISION = 1e18;
 
     function setUp() public {
         usdc = new MockUSDC();
         usdc.transfer(alice, 1_000_000 * 1e6);
+        usdc.transfer(bob, 1_000_000 * 1e6);
 
         EventMarketUpgradeable marketImpl = new EventMarketUpgradeable();
         beacon = new UpgradeableBeacon(address(marketImpl), admin);
@@ -109,5 +113,76 @@ contract EventPerpetualUpgradeableTest is Test {
 
         assertEq(m.collateralBalance(alice), 1000 * 1e6);
         assertEq(address(m.collateral()), address(usdc));
+    }
+
+    function test_CloseOnly_RevertsNewFill() public {
+        vm.prank(admin);
+        (, address market) = factory.createEvent("Test", block.timestamp + 1 days, oracle);
+        EventMarketUpgradeable m = EventMarketUpgradeable(payable(market));
+        vm.prank(admin);
+        factory.setMarketCloseOnly(0, true);
+        assertTrue(m.closeOnly());
+    }
+
+    function test_CancelOrder_V2() public {
+        vm.prank(admin);
+        (, address market) = factory.createEvent("Test", block.timestamp + 1 days, oracle);
+        EventMarketUpgradeable m = EventMarketUpgradeable(payable(market));
+        bytes32 salt = keccak256("order1");
+        uint256 size = 100 * 1e6;
+        bytes32 orderHash = m.getOrderHash(alice, 0.6e18, size, 0, block.timestamp + 1 days, salt);
+        assertEq(m.filledAmount(orderHash), 0);
+        vm.prank(alice);
+        m.cancelOrder(0.6e18, size, 0, block.timestamp + 1 days, salt);
+        assertEq(m.filledAmount(orderHash), size);
+        vm.expectRevert();
+        vm.prank(alice);
+        m.cancelOrder(0.6e18, size, 0, block.timestamp + 1 days, salt);
+    }
+
+    function test_SetIndexPrice_AndMicrostructure() public {
+        vm.prank(admin);
+        (, address market) = factory.createEvent("Test", block.timestamp + 1 days, oracle);
+        EventMarketUpgradeable m = EventMarketUpgradeable(payable(market));
+        vm.prank(admin);
+        factory.setMarketIndexPrice(0, 0.65e18);
+        assertEq(m.getIndexPrice(), 0.65e18);
+        vm.prank(admin);
+        factory.setMarketMicrostructure(0, 1500, 2500);
+        assertEq(m.markEmaAlphaBps(), 1500);
+        assertEq(m.maxMarkDeviationBps(), 2500);
+    }
+
+    function test_ResolveEvent_SettleAndWithdraw() public {
+        vm.prank(admin);
+        (, address market) = factory.createEvent("Test", block.timestamp + 1 days, oracle);
+        EventMarketUpgradeable m = EventMarketUpgradeable(payable(market));
+        vm.startPrank(alice);
+        usdc.approve(market, 1000 * 1e6);
+        m.deposit(1000 * 1e6);
+        vm.stopPrank();
+        vm.prank(admin);
+        factory.resolveEvent(0, true);
+        assertTrue(m.resolved());
+        assertTrue(m.outcome());
+        uint256 balBefore = usdc.balanceOf(alice);
+        vm.prank(alice);
+        m.settleAndWithdraw();
+        assertEq(usdc.balanceOf(alice), balBefore + 1000 * 1e6);
+        assertEq(m.collateralBalance(alice), 0);
+    }
+
+    function testFuzz_DepositWithdraw(uint256 amount) public {
+        amount = bound(amount, 1, 1_000_000 * 1e6);
+        vm.prank(admin);
+        (, address market) = factory.createEvent("Test", block.timestamp + 1 days, oracle);
+        EventMarketUpgradeable m = EventMarketUpgradeable(payable(market));
+        vm.startPrank(alice);
+        usdc.approve(market, amount);
+        m.deposit(amount);
+        assertEq(m.collateralBalance(alice), amount);
+        m.withdraw(amount / 2);
+        assertEq(m.collateralBalance(alice), amount - amount / 2);
+        vm.stopPrank();
     }
 }

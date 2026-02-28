@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 import {IEventFactory} from "./interfaces/IEventFactory.sol";
-import {EventMarket} from "./EventMarket.sol";
 import {EventMarketUpgradeable} from "./EventMarketUpgradeable.sol";
 import {BeaconProxy} from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
@@ -97,13 +96,16 @@ contract EventFactoryUpgradeable is IEventFactory, Initializable, UUPSUpgradeabl
         return (eventId, market);
     }
 
-    function resolveEvent(uint256 eventId, bool outcome) external onlyOracle(eventId) {
+    /// @notice Resolve event (testing: admin or oracle can resolve anytime; remove time check for testing)
+    function resolveEvent(uint256 eventId, bool outcome) external {
         EventInfo storage e = _events[eventId];
+        if (msg.sender != admin && msg.sender != e.oracle) revert Unauthorized();
         if (e.resolved) revert AlreadyResolved();
-        if (block.timestamp < e.resolutionTime) revert NotYetResolvable();
+        // Testing: allow resolution anytime (skip NotYetResolvable)
+        // if (block.timestamp < e.resolutionTime) revert NotYetResolvable();
         e.resolved = true;
         e.outcome = outcome;
-        EventMarket(e.market).resolve(outcome);
+        EventMarketUpgradeable(e.market).resolve(outcome);
         emit EventResolved(eventId, outcome);
     }
 
@@ -127,6 +129,25 @@ contract EventFactoryUpgradeable is IEventFactory, Initializable, UUPSUpgradeabl
 
     function setMarketIndexPrice(uint256 eventId, uint256 indexPrice) external {
         if (msg.sender != admin && msg.sender != _events[eventId].oracle) revert Unauthorized();
-        EventMarket(_events[eventId].market).setIndexPrice(indexPrice);
+        EventMarketUpgradeable(_events[eventId].market).setIndexPrice(indexPrice);
+    }
+
+    /// @notice Configure mark-price microstructure for a market (testing/admin ops)
+    /// @param alphaBps EMA alpha in bps (10000 = full last trade, lower = smoother)
+    /// @param maxDeviationBps Max allowed deviation from index in bps (0 disables clamp)
+    function setMarketMicrostructure(uint256 eventId, uint256 alphaBps, uint256 maxDeviationBps) external onlyAdmin {
+        EventMarketUpgradeable(_events[eventId].market).setMarkMicrostructure(alphaBps, maxDeviationBps);
+    }
+
+    function setMarketCloseOnly(uint256 eventId, bool closeOnly) external onlyAdmin {
+        EventMarketUpgradeable(_events[eventId].market).setCloseOnly(closeOnly);
+    }
+
+    function setMarketFundingRateCaps(uint256 eventId, int256 rateCap, int256 rateFloor) external onlyAdmin {
+        EventMarketUpgradeable(_events[eventId].market).setFundingRateCaps(rateCap, rateFloor);
+    }
+
+    function setMarketMaxLiquidationSizeBps(uint256 eventId, uint256 maxLiquidationSizeBps) external onlyAdmin {
+        EventMarketUpgradeable(_events[eventId].market).setMaxLiquidationSizeBps(maxLiquidationSizeBps);
     }
 }

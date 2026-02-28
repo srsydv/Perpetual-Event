@@ -25,4 +25,10 @@ export const EVENT_MARKET_ABI = [
     type: "function",
   },
   { inputs: [], name: "settleAndWithdraw", outputs: [], stateMutability: "nonpayable", type: "function" },
+  { inputs: [], name: "getIndexPrice", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "closeOnly", outputs: [{ name: "", type: "bool" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "markEmaAlphaBps", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "maxMarkDeviationBps", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "fundingIndex", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "lastFundingTime", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" },
 ] as const;

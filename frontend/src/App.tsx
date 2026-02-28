@@ -3,6 +3,7 @@ import Layout from "./components/Layout";
 import Home from "./pages/Home";
 import Market from "./pages/Market";
 import CreateEvent from "./pages/CreateEvent";
+import Admin from "./pages/Admin";
 
 export default function App() {
   return (
@@ -12,6 +13,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/market/:eventId" element={<Market />} />
           <Route path="/create" element={<CreateEvent />} />
+          <Route path="/admin" element={<Admin />} />
         </Routes>
       </Layout>
     </BrowserRouter>

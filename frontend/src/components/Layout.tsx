@@ -12,6 +12,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <nav className="flex items-center gap-6">
             <Link to="/" className="text-gray-400 hover:text-white">Markets</Link>
             <Link to="/create" className="text-gray-400 hover:text-white">Create</Link>
+            <Link to="/admin" className="text-gray-400 hover:text-white">Admin</Link>
             <ConnectButton />
           </nav>
         </div>

@@ -9,3 +9,8 @@ export const DEPLOYED = {
 };
 
 export const PRECISION = 1e18;
+
+/** Matcher API base URL (optional). When set, order book and simulate-fill use matcher. */
+export const MATCHER_API =
+  (typeof import.meta !== "undefined" && (import.meta as unknown as { env?: { VITE_MATCHER_API?: string } }).env?.VITE_MATCHER_API) ||
+  "";
