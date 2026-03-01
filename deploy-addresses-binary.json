@@ -1,0 +1,11 @@
+{
+  "chainId": 11155111,
+  "collateral": "0x799a5570318c0C5Fcfd09b0f573335B5aa8d85Ff",
+  "binaryMarketFactory": "0x8C3DDBa0A9a0E336711c4Fc97Ae5d9aF76BBf7F9",
+  "markets": {
+    "0": "0x563c9A8da99422d0B2C8e84B0f5aF89E6DA72da1"
+  }
+}
+
+BinaryMarketFactory: 0x8C3DDBa0A9a0E336711c4Fc97Ae5d9aF76BBf7F9
+Created market id 0: 0x563c9A8da99422d0B2C8e84B0f5aF89E6DA72da1

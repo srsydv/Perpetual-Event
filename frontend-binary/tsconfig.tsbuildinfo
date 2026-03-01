@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/config.ts","./src/main.tsx","./src/wagmi.ts","./src/abis/erc20.ts","./src/abis/factory.ts","./src/abis/market.ts","./src/components/layout.tsx","./src/components/tradepanel.tsx","./src/pages/createevent.tsx","./src/pages/home.tsx","./src/pages/market.tsx"],"errors":true,"version":"5.9.3"}
