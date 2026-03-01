@@ -1,5 +1,5 @@
 /**
- * Basic tests for Binary (Polymarket-style) market: deposit, mint, trade, resolve, redeem.
+ * Basic tests for Binary (Polymarket-style) market: upgradeable factory + beacon; deposit, mint, trade, resolve, redeem.
  */
 const { expect } = require("chai");
 const hre = require("hardhat");
@@ -22,9 +22,25 @@ describe("BinaryMarket", function () {
     for (const acc of [admin, alice, bob]) {
       await collateral.transfer(await acc.getAddress(), parseCollateral("10000"));
     }
+
+    const BinaryMarket = await ethers.getContractFactory("BinaryMarket");
+    const marketImpl = await BinaryMarket.deploy();
+    await marketImpl.waitForDeployment();
+    const UpgradeableBeacon = await ethers.getContractFactory("UpgradeableBeacon");
+    const beacon = await UpgradeableBeacon.deploy(await marketImpl.getAddress(), admin.address);
+    await beacon.waitForDeployment();
     const BinaryMarketFactory = await ethers.getContractFactory("BinaryMarketFactory");
-    factory = await BinaryMarketFactory.deploy(admin.address);
-    await factory.waitForDeployment();
+    const factoryImpl = await BinaryMarketFactory.deploy();
+    await factoryImpl.waitForDeployment();
+    const ERC1967Proxy = await ethers.getContractFactory("ERC1967Proxy");
+    const initData = BinaryMarketFactory.interface.encodeFunctionData("initialize", [
+      admin.address,
+      await beacon.getAddress(),
+    ]);
+    const proxy = await ERC1967Proxy.deploy(await factoryImpl.getAddress(), initData);
+    await proxy.waitForDeployment();
+    factory = await ethers.getContractAt("BinaryMarketFactory", await proxy.getAddress());
+
     const resolutionTime = Math.floor(Date.now() / 1000) + 86400 * 365;
     await factory.createMarket(await collateral.getAddress(), "will-x-win", resolutionTime);
     const marketAddr = await factory.markets(0);

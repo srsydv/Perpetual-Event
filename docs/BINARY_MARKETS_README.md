@@ -2,10 +2,10 @@
 
 This product is a **separate** Polymarket-style prediction market: binary YES/NO outcomes, no margin or leverage. Buy/sell shares; at resolution redeem winning shares for 1:1 collateral.
 
-## Contracts
+## Contracts (Upgradeable)
 
-- **BinaryMarket** (`src/binary/BinaryMarket.sol`): One market per event. Deposit/withdraw collateral; mint shares (1 collateral → 1 YES + 1 NO); merge (1 YES + 1 NO → 1 collateral); trade via CLOB (same EIP-712 order format as perp); resolve; redeem.
-- **BinaryMarketFactory** (`src/binary/BinaryMarketFactory.sol`): Deploys BinaryMarket instances. Admin can create markets and resolve them.
+- **BinaryMarket** (`src/binary/BinaryMarket.sol`): One market per event, deployed as **BeaconProxy**. Deposit/withdraw collateral; mint/merge shares; trade via CLOB; resolve; redeem. Logic can be upgraded by upgrading the beacon (admin).
+- **BinaryMarketFactory** (`src/binary/BinaryMarketFactory.sol`): **UUPS proxy**. Deploys markets via a single **UpgradeableBeacon**; admin can create markets, resolve them, `setMarketBeacon`, and upgrade the factory.
 
 ## Deploy
 
@@ -16,7 +16,7 @@ export ADMIN=0x...        # Optional; defaults to deployer
 npx hardhat run scripts/deploy-binary.js --network sepolia
 ```
 
-This writes `deploy-addresses-binary.json`. For frontend, set env:
+This deploys: BinaryMarket implementation, UpgradeableBeacon(marketImpl, admin), BinaryMarketFactory implementation, ERC1967Proxy(factoryImpl, initialize(admin, beacon)). It writes `deploy-addresses-binary.json`. For frontend, set env:
 
 - `VITE_BINARY_FACTORY` = factory address
 - `VITE_BINARY_MARKET_0` = first market address
@@ -49,3 +49,14 @@ The **same matcher** as the perp product is used. Orders are keyed by market add
 5. **Redeem**: If YES won, redeem YES shares for 1:1 collateral; if NO won, redeem NO shares.
 
 No margin, no funding, no liquidation — just shares and resolution payout.
+
+## Upgrading
+
+- **Factory**: Deploy new BinaryMarketFactory implementation, then from admin: `factory.upgradeToAndCall(newImpl, "0x")`.
+- **Markets**: Deploy new BinaryMarket implementation, then from beacon owner (admin): `beacon.upgradeTo(newMarketImpl)`. All existing market proxies then use the new logic.
+
+Use the script (as admin):
+
+```bash
+npx hardhat run scripts/upgrade-binary-sepolia.js --network sepolia
+```

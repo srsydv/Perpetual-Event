@@ -1,3 +1,9 @@
+/**
+ * Deploy binary (Polymarket-style) contracts: upgradeable factory + beacon for markets.
+ * Writes deploy-addresses-binary.json with proxy and implementation addresses.
+ *
+ * npx hardhat run scripts/deploy-binary.js --network sepolia
+ */
 const hre = require("hardhat");
 const fs = require("fs");
 
@@ -9,15 +15,44 @@ async function main() {
   const collateral = process.env.COLLATERAL || process.env.COLLATERAL_TOKEN_ADDRESS || COLLATERAL_DEFAULT;
   const admin = process.env.ADMIN || deployer.address;
 
-  console.log("Deploying Binary (Polymarket-style) with:", { collateral, admin, deployer: deployer.address });
+  console.log("Deploying Binary (Polymarket-style, upgradeable) with:", {
+    collateral,
+    admin,
+    deployer: deployer.address,
+  });
 
+  // 1. BinaryMarket implementation
+  const BinaryMarket = await ethers.getContractFactory("BinaryMarket");
+  const marketImpl = await BinaryMarket.deploy();
+  await marketImpl.waitForDeployment();
+  const marketImplAddress = await marketImpl.getAddress();
+  console.log("BinaryMarket implementation:", marketImplAddress);
+
+  // 2. Beacon (owner = admin)
+  const UpgradeableBeacon = await ethers.getContractFactory("UpgradeableBeacon");
+  const beacon = await UpgradeableBeacon.deploy(marketImplAddress, admin);
+  await beacon.waitForDeployment();
+  const beaconAddress = await beacon.getAddress();
+  console.log("Market Beacon:", beaconAddress);
+
+  // 3. BinaryMarketFactory implementation
   const BinaryMarketFactory = await ethers.getContractFactory("BinaryMarketFactory");
-  const factory = await BinaryMarketFactory.deploy(admin);
-  await factory.waitForDeployment();
-  const factoryAddress = await factory.getAddress();
-  console.log("BinaryMarketFactory:", factoryAddress);
+  const factoryImpl = await BinaryMarketFactory.deploy();
+  await factoryImpl.waitForDeployment();
+  const factoryImplAddress = await factoryImpl.getAddress();
+  console.log("BinaryMarketFactory implementation:", factoryImplAddress);
 
-  const resolutionTime = Math.floor(Date.now() / 1000) + 365 * 24 * 3600; // 1 year
+  // 4. Factory proxy: initialize(admin, beacon)
+  const ERC1967Proxy = await ethers.getContractFactory("ERC1967Proxy");
+  const initData = BinaryMarketFactory.interface.encodeFunctionData("initialize", [admin, beaconAddress]);
+  const proxy = await ERC1967Proxy.deploy(factoryImplAddress, initData);
+  await proxy.waitForDeployment();
+  const proxyAddress = await proxy.getAddress();
+  console.log("BinaryMarketFactory proxy (use this):", proxyAddress);
+
+  // 5. Create first market
+  const factory = await ethers.getContractAt("BinaryMarketFactory", proxyAddress);
+  const resolutionTime = Math.floor(Date.now() / 1000) + 365 * 24 * 3600;
   const tx = await factory.createMarket(collateral, "will-india-win", resolutionTime);
   const receipt = await tx.wait();
   const created = receipt.logs.find((l) => l.fragment?.name === "MarketCreated");
@@ -29,7 +64,11 @@ async function main() {
   const out = {
     chainId: Number(chainId),
     collateral,
-    binaryMarketFactory: factoryAddress,
+    binaryMarketImplementation: marketImplAddress,
+    marketBeacon: beaconAddress,
+    binaryMarketFactoryImplementation: factoryImplAddress,
+    binaryMarketFactoryProxy: proxyAddress,
+    binaryMarketFactory: proxyAddress, // alias for frontend
     markets: { 0: marketAddress },
   };
 
@@ -38,4 +77,7 @@ async function main() {
   console.log("Wrote", outPath);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

@@ -5,13 +5,14 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {IBinaryMarket} from "./IBinaryMarket.sol";
 import {EIP712Initializable} from "../upgradeable/EIP712Initializable.sol";
 
-/// @title BinaryMarket (Polymarket-style)
+/// @title BinaryMarket (Polymarket-style, Upgradeable)
 /// @notice Binary outcome market: buy/sell YES and NO shares; at resolution redeem winning shares for 1:1 collateral.
-/// No margin, no leverage, no funding. CLOB: same EIP-712 order format; fill transfers collateral and share balances.
-contract BinaryMarket is IBinaryMarket, ReentrancyGuard, EIP712Initializable {
+/// No margin, no leverage, no funding. Deployed via BeaconProxy; use initialize() for proxy init.
+contract BinaryMarket is IBinaryMarket, Initializable, ReentrancyGuard, EIP712Initializable {
     using SafeERC20 for IERC20;
 
     bytes32 public constant ORDER_TYPEHASH_V1 = keccak256(
@@ -80,12 +81,13 @@ contract BinaryMarket is IBinaryMarket, ReentrancyGuard, EIP712Initializable {
         _;
     }
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
-        // non-upgradeable; init via initializer called by factory
+        _disableInitializers();
     }
 
-    function initialize(address collateral_, address _factory, uint256 _marketId) external {
-        require(collateral_ != address(0) && factory == address(0), "already init");
+    function initialize(address collateral_, address _factory, uint256 _marketId) external initializer {
+        require(collateral_ != address(0), "invalid collateral");
         _collateral = IERC20(collateral_);
         factory = _factory;
         marketId = _marketId;

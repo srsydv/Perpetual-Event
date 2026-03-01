@@ -11,6 +11,7 @@ interface IBinaryMarketFactory {
     }
 
     function admin() external view returns (address);
+    function marketBeacon() external view returns (address);
     function marketCount() external view returns (uint256);
     function markets(uint256) external view returns (address);
     function createMarket(address collateral, string calldata questionId, uint256 resolutionTime) external returns (uint256 marketId, address market);
