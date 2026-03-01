@@ -3,6 +3,7 @@ import { useAccount, useReadContract, useWriteContract, useWaitForTransactionRec
 import { parseUnits, formatUnits } from "viem";
 import { useState, useEffect } from "react";
 import { DEPLOYED } from "@/config";
+import { BINARY_FACTORY_ABI } from "@/abis/binaryFactory";
 import { BINARY_MARKET_ABI } from "@/abis/binaryMarket";
 import { ERC20_ABI } from "@/abis/erc20";
 import TradePanel from "@/components/TradePanel";
@@ -11,7 +12,17 @@ import OrderBook from "@/components/OrderBook";
 export default function Market() {
   const { marketId: marketIdParam } = useParams<{ marketId: string }>();
   const id = marketIdParam ?? "0";
-  const marketAddress = (DEPLOYED.markets[id] || "") as `0x${string}` | undefined;
+  const marketIdNum = parseInt(id, 10);
+  const { data: marketAddressFromChain } = useReadContract({
+    address: DEPLOYED.binaryMarketFactory,
+    abi: BINARY_FACTORY_ABI,
+    functionName: "markets",
+    args: [BigInt(isNaN(marketIdNum) ? 0 : marketIdNum)],
+    chainId: DEPLOYED.chainId,
+  });
+  const marketAddress = (marketAddressFromChain as string | undefined)
+    ? (marketAddressFromChain as string as `0x${string}`)
+    : undefined;
   const { address } = useAccount();
 
   const { data: resolved } = useReadContract({
@@ -42,19 +53,25 @@ export default function Market() {
     functionName: "noBalance",
     args: address ? [address] : undefined,
   });
+  const { data: marketCollateralAddr } = useReadContract({
+    address: marketAddress,
+    abi: BINARY_MARKET_ABI,
+    functionName: "collateral",
+  });
+  const collateralAddr = (marketCollateralAddr as `0x${string}` | undefined) ?? DEPLOYED.collateral;
   const { data: collateralBalance } = useReadContract({
-    address: DEPLOYED.collateral,
+    address: collateralAddr,
     abi: ERC20_ABI,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
   });
   const { data: decimals } = useReadContract({
-    address: DEPLOYED.collateral,
+    address: collateralAddr,
     abi: ERC20_ABI,
     functionName: "decimals",
   });
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
-    address: DEPLOYED.collateral,
+    address: collateralAddr,
     abi: ERC20_ABI,
     functionName: "allowance",
     args: address && marketAddress ? [address, marketAddress] : undefined,
@@ -96,7 +113,7 @@ export default function Market() {
   const handleApprove = () => {
     if (!marketAddress || !depositAmount) return;
     approveToken({
-      address: DEPLOYED.collateral,
+      address: collateralAddr,
       abi: ERC20_ABI,
       functionName: "approve",
       args: [marketAddress, parseUnits(depositAmount, dec)],
@@ -150,11 +167,19 @@ export default function Market() {
   const redeemableYes = outcomeYes && yesBal != null && yesBal > 0n;
   const redeemableNo = !outcomeYes && noBal != null && noBal > 0n;
 
-  if (!marketAddress || marketAddress === "0x0000000000000000000000000000000000000000") {
+  if (marketAddressFromChain !== undefined && (!marketAddress || marketAddress === "0x0000000000000000000000000000000000000000")) {
     return (
       <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-200">
-        <p>Market not configured. Run <code>npx hardhat run scripts/deploy-binary.js --network sepolia</code> and set VITE_BINARY_MARKET_0 (or VITE_BINARY_DEPLOY_JSON) in .env.</p>
+        <p>Market #{id} not found. It may not exist yet—admin can create it from the <Link to="/admin" className="text-polymarket-blue underline">Admin</Link> page.</p>
         <Link to="/" className="mt-2 inline-block text-polymarket-blue">← Home</Link>
+      </div>
+    );
+  }
+  if (!marketAddress) {
+    return (
+      <div className="rounded-xl border border-polymarket-border bg-polymarket-card p-6 text-gray-400">
+        Loading market…
+        <Link to="/" className="ml-2 text-polymarket-blue">← Home</Link>
       </div>
     );
   }

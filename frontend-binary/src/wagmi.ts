@@ -6,7 +6,7 @@ import { http } from "wagmi";
 const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || "event-perpetuals-app";
 
 export const config = getDefaultConfig({
-  appName: "Event Perpetuals",
+  appName: "Binary Markets",
   projectId,
   chains: [sepolia],
   transports: {

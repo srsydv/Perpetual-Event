@@ -24,10 +24,11 @@ This deploys: BinaryMarket implementation, UpgradeableBeacon(marketImpl, admin),
 
 ## Frontend
 
+The frontend is preconfigured with the latest Sepolia deploy: `frontend-binary/src/data/deploy-addresses-binary.json` and `frontend-binary/.env`. After a new deploy, run `npm run sync-deploy` in `frontend-binary` to refresh addresses.
+
 ```bash
 cd frontend-binary
-cp .env.example .env
-# Set VITE_BINARY_FACTORY, VITE_BINARY_MARKET_0 (or VITE_BINARY_DEPLOY_JSON), VITE_SEPOLIA_RPC_URL, VITE_MATCHER_API (optional), VITE_WALLETCONNECT_PROJECT_ID
+# .env already has deployed addresses; optionally copy .env.example and edit
 npm install
 npm run dev
 ```

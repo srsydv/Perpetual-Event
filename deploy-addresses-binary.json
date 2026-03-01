@@ -1,11 +1,12 @@
 {
   "chainId": 11155111,
   "collateral": "0x799a5570318c0C5Fcfd09b0f573335B5aa8d85Ff",
-  "binaryMarketFactory": "0x8C3DDBa0A9a0E336711c4Fc97Ae5d9aF76BBf7F9",
+  "binaryMarketImplementation": "0x1DD7C662eB3E13105ACe5e6a3189AB4251021096",
+  "marketBeacon": "0x250dd5c7290fc2d4c85AEa39d21129a488AD529c",
+  "binaryMarketFactoryImplementation": "0xBF5E56dDA1bF6116ED3a4Df72cCD4c44523C631b",
+  "binaryMarketFactoryProxy": "0xc378bD4420072e3f997610E81605d203D1BC0466",
+  "binaryMarketFactory": "0xc378bD4420072e3f997610E81605d203D1BC0466",
   "markets": {
-    "0": "0x563c9A8da99422d0B2C8e84B0f5aF89E6DA72da1"
+    "0": "0x9D91287C44455982ceAeB8889Db9f53dC188fC94"
   }
 }
-
-BinaryMarketFactory: 0x8C3DDBa0A9a0E336711c4Fc97Ae5d9aF76BBf7F9
-Created market id 0: 0x563c9A8da99422d0B2C8e84B0f5aF89E6DA72da1

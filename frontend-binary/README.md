@@ -1,29 +1,34 @@
-# Event Perpetuals – Frontend
+# Binary Markets Frontend (Polymarket-style)
 
-Polymarket-style UI for Event Perpetuals on Sepolia. Uses deployed contract addresses from the repo root.
+React + Vite + wagmi frontend for the binary prediction markets (Sepolia). Uses the deployed contracts from `deploy-addresses-binary.json`.
 
-## Setup
+## Quick start (testing)
 
-```bash
-cd frontend
-npm install
-```
+1. **Contracts are already deployed** – addresses are in `src/data/deploy-addresses-binary.json` and in `.env`. No extra setup needed.
 
-Optional: copy `.env.example` to `.env` and set `VITE_SEPOLIA_RPC_URL` (and WalletConnect project ID if needed).
+2. **Install and run**
+   ```bash
+   npm install
+   npm run dev
+   ```
+   Open http://localhost:5173 (or the URL Vite prints).
 
-## Run
+3. **Connect wallet** (Sepolia). Get Sepolia ETH from a faucet if needed.
 
-```bash
-npm run dev
-```
+4. **Test flow**
+   - **Home**: See “Binary Market #0”, click to open.
+   - **Market page**: Approve collateral → Deposit → (optional) Mint shares → Place limit order or fill an order → After resolution, Redeem.
+   - **Admin** (nav): Connect as factory admin to resolve a market (YES/NO).
 
-Open http://localhost:5173. Connect a wallet on **Sepolia**. Collateral token: `0x799a5570318c0C5Fcfd09b0f573335B5aa8d85Ff`.
+## Config
 
-## Flow
+- **Addresses**: Loaded from `src/data/deploy-addresses-binary.json` by default. Override with `.env`:
+  - `VITE_BINARY_FACTORY` – factory proxy address
+  - `VITE_BINARY_MARKET_0` – market 0 address
+  - `VITE_COLLATERAL` – collateral token address
+- **After redeploy**: From repo root run `npx hardhat run scripts/deploy-binary.js --network sepolia`, then in this folder run `npm run sync-deploy` to copy the new addresses into `src/data/`.
 
-1. **Markets** – List events (from factory). Click a market to open detail.
-2. **Market page** – View probability (mark price), your position, balance. **Deposit**: approve collateral then deposit. **Withdraw**: withdraw from market back to wallet.
-3. **Trade** – **Place order**: set price (0–100%), size, Long (YES) or Short (NO), click “Sign order”. Order is stored in the browser. **Fill order**: use a stored order or paste maker order + signature; set your side (taker) and size, then “Submit fill”. Maker and taker must be opposite sides (one long, one short). For single-wallet testing, sign as maker then switch to another account and fill as taker.
-4. **Create event** – Admin only. Set name, resolution days, oracle address.
+## Optional
 
-Addresses are in `src/config.ts` (same as `deploy-addresses.sepolia.json`).
+- **WalletConnect**: Set `VITE_WALLETCONNECT_PROJECT_ID` in `.env` (free at https://cloud.walletconnect.com) to avoid 403 from the modal.
+- **Matcher**: Set `VITE_MATCHER_API` (e.g. `http://localhost:3001`) to use the order-book / place-order API.

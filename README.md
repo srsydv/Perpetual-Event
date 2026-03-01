@@ -2,6 +2,13 @@
 
 **Sepolia (current):**
 
+BinaryMarket implementation	0x1DD7C662eB3E13105ACe5e6a3189AB4251021096
+Market Beacon	0x250dd5c7290fc2d4c85AEa39d21129a488AD529c
+BinaryMarketFactory implementation	0xBF5E56dDA1bF6116ED3a4Df72cCD4c44523C631b
+BinaryMarketFactory proxy (use this)	0xc378bD4420072e3f997610E81605d203D1BC0466
+Market 0	0x9D91287C44455982ceAeB8889Db9f53dC188fC94
+
+
 | Contract | Address |
 |----------|---------|
 | EventFactory **proxy** (use this) | `0xE7bdA6634dC55F68e9a878fdf29C4b34DE2d2a03` |
