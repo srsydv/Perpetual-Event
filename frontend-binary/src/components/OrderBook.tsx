@@ -36,9 +36,34 @@ export default function OrderBook({ marketAddress }: { marketAddress: string }) 
   const bids = data?.bids ?? [];
   const asks = data?.asks ?? [];
 
+  const bestBidPct = bids.length > 0 ? (Number(bids[0].limitPrice) / 1e18) * 100 : null;
+  const bestAskPct = asks.length > 0 ? (Number(asks[0].limitPrice) / 1e18) * 100 : null;
+  const midPct =
+    bestBidPct != null && bestAskPct != null
+      ? (bestBidPct + bestAskPct) / 2
+      : bestBidPct ?? bestAskPct;
+
   return (
     <div className="rounded-xl border border-polymarket-border bg-polymarket-card p-4">
       <h3 className="mb-3 text-sm font-medium text-white">Order book</h3>
+      <div className="mb-4 rounded-lg border border-polymarket-border/60 bg-polymarket-bg/50 p-3">
+        <p className="text-xs text-gray-500">Market price (from order book)</p>
+        {midPct != null ? (
+          <p className="mt-1 text-lg font-semibold text-white">
+            YES <span className="text-polymarket-green">{midPct.toFixed(1)}%</span>
+            {" · "}
+            NO <span className="text-polymarket-red">{(100 - midPct).toFixed(1)}%</span>
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-gray-400">No orders yet — place or fill orders to discover price.</p>
+        )}
+        {bestBidPct != null && (
+          <p className="mt-0.5 text-xs text-gray-500">Best bid: {bestBidPct.toFixed(1)}%</p>
+        )}
+        {bestAskPct != null && (
+          <p className="text-xs text-gray-500">Best ask: {bestAskPct.toFixed(1)}%</p>
+        )}
+      </div>
       <div className="grid grid-cols-2 gap-4 text-xs">
         <div>
           <p className="mb-1 font-medium text-polymarket-green">Bids (Long)</p>

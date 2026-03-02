@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { signTypedData } from "@wagmi/core";
 import { decodeAbiParameters, encodeAbiParameters, formatUnits, parseAbiParameters, parseUnits } from "viem";
@@ -43,6 +43,10 @@ function formatPercentFrom1e18(price: bigint): string {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
 }
 
+function normalizeHex(input: string): string {
+  return input.trim().replace(/\s+/g, "");
+}
+
 function getOrderInfoFromHex(makerOrderHex: string): {
   maker: string;
   makerLong: boolean;
@@ -54,7 +58,9 @@ function getOrderInfoFromHex(makerOrderHex: string): {
   makerSize: string;
 } | null {
   try {
-    const hex = makerOrderHex.startsWith("0x") ? makerOrderHex : `0x${makerOrderHex}`;
+    const raw = normalizeHex(makerOrderHex);
+    if (!raw) return null;
+    const hex = raw.startsWith("0x") ? raw : `0x${raw}`;
     const decoded = decodeAbiParameters(
       parseAbiParameters("address, uint256, uint256, uint256, uint256, uint256"),
       hex as `0x${string}`
@@ -107,6 +113,24 @@ export default function TradePanel({
   const { isLoading: fillPending } = useWaitForTransactionReceipt({ hash: fillHash });
 
   const storedOrders = getStoredOrders(marketAddress);
+
+  // When there are stored orders, auto-fill maker order + signature from the selected index (on load or when selection changes)
+  useEffect(() => {
+    if (storedOrders.length > 0 && selectedOrderIndex >= 0 && selectedOrderIndex < storedOrders.length) {
+      const o = storedOrders[selectedOrderIndex];
+      if (o?.makerOrder && o?.signature) {
+        setMakerOrderHex(o.makerOrder);
+        setSignatureHex(o.signature);
+        const info = getOrderInfoFromHex(o.makerOrder);
+        if (info) {
+          setFillPrice(info.makerPricePct);
+          setFillSize(info.makerSize);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- storedOrders from getStoredOrders(marketAddress), sync when selection or market changes
+  }, [marketAddress, selectedOrderIndex, storedOrders.length]);
+
   const selectedOrderInfo = getOrderInfoFromHex(makerOrderHex);
   const takerIsLong = selectedOrderInfo ? !selectedOrderInfo.makerLong : null;
   const { data: makerNonceOnChain } = useReadContract({
@@ -193,15 +217,29 @@ export default function TradePanel({
     setFillPrice(placePrice);
     setFillSize(placeSize);
     setSelectedOrderIndex(storedOrders.length);
-    alert("Order signed and stored. You can fill it (as taker) or share makerOrder + signature.");
+  };
+
+  const copyMakerOrder = () => {
+    if (!makerOrderHex) return;
+    navigator.clipboard.writeText(makerOrderHex).then(
+      () => alert("Copied maker order hex. Paste it in the other account's 'Or paste maker order (hex)' field."),
+      () => alert("Copy failed.")
+    );
+  };
+  const copySignature = () => {
+    if (!signatureHex) return;
+    navigator.clipboard.writeText(signatureHex).then(
+      () => alert("Copied signature hex. Paste it in the other account's 'Signature (hex)' field."),
+      () => alert("Copy failed.")
+    );
   };
 
   const fillOrder = () => {
     if (!canSubmitFill) return;
-    const makerOrder = makerOrderHex.startsWith("0x")
-      ? makerOrderHex as `0x${string}`
-      : `0x${makerOrderHex}` as `0x${string}`;
-    const signature = (signatureHex.startsWith("0x") ? signatureHex : `0x${signatureHex}`) as `0x${string}`;
+    const rawOrder = normalizeHex(makerOrderHex);
+    const rawSig = normalizeHex(signatureHex);
+    const makerOrder = (rawOrder.startsWith("0x") ? rawOrder : `0x${rawOrder}`) as `0x${string}`;
+    const signature = (rawSig.startsWith("0x") ? rawSig : `0x${rawSig}`) as `0x${string}`;
     if (!address || takerIsLong === null || fillPriceRaw === null || fillSizeRaw === null) return;
     submitFill({
       address: marketAddress,
@@ -289,29 +327,51 @@ export default function TradePanel({
               </>
             )}
             <label className="block text-xs text-gray-500">Or paste maker order (hex)</label>
-            <input
-              type="text"
-              placeholder="0x..."
-              value={makerOrderHex}
-              onChange={(e) => {
-                const next = e.target.value;
-                setMakerOrderHex(next);
-                const info = getOrderInfoFromHex(next);
-                if (info) {
-                  setFillPrice(info.makerPricePct);
-                  setFillSize(info.makerSize);
-                }
-              }}
-              className="w-full rounded border border-polymarket-border bg-polymarket-bg px-3 py-2 text-sm text-white placeholder-gray-500"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="0x... (paste from maker; spaces/newlines are auto-removed)"
+                value={makerOrderHex}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setMakerOrderHex(next);
+                  const info = getOrderInfoFromHex(next);
+                  if (info) {
+                    setFillPrice(info.makerPricePct);
+                    setFillSize(info.makerSize);
+                  }
+                }}
+                className="min-w-0 flex-1 rounded border border-polymarket-border bg-polymarket-bg px-3 py-2 text-sm text-white placeholder-gray-500"
+              />
+              <button
+                type="button"
+                onClick={copyMakerOrder}
+                disabled={!makerOrderHex}
+                className="shrink-0 rounded border border-polymarket-border bg-polymarket-bg px-2 py-1 text-xs text-gray-300 hover:bg-polymarket-border/50 disabled:opacity-40"
+                title="Copy maker order hex for the other account"
+              >
+                Copy order
+              </button>
+            </div>
             <label className="block text-xs text-gray-500">Signature (hex)</label>
-            <input
-              type="text"
-              placeholder="0x..."
-              value={signatureHex}
-              onChange={(e) => setSignatureHex(e.target.value)}
-              className="w-full rounded border border-polymarket-border bg-polymarket-bg px-3 py-2 text-sm text-white placeholder-gray-500"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="0x... (paste from maker; spaces/newlines are auto-removed)"
+                value={signatureHex}
+                onChange={(e) => setSignatureHex(e.target.value)}
+                className="min-w-0 flex-1 rounded border border-polymarket-border bg-polymarket-bg px-3 py-2 text-sm text-white placeholder-gray-500"
+              />
+              <button
+                type="button"
+                onClick={copySignature}
+                disabled={!signatureHex}
+                className="shrink-0 rounded border border-polymarket-border bg-polymarket-bg px-2 py-1 text-xs text-gray-300 hover:bg-polymarket-border/50 disabled:opacity-40"
+                title="Copy signature hex for the other account"
+              >
+                Copy sig
+              </button>
+            </div>
             <label className="block text-xs text-gray-500">Your side: Price (%)</label>
             <input
               type="number"
@@ -370,7 +430,7 @@ export default function TradePanel({
         </div>
       </div>
       <p className="mt-3 text-xs text-gray-500">
-        To test: sign an order as maker, then switch wallet (or use another account) and fill as taker with opposite side.
+        To test: (1) As maker: sign order, then click &quot;Copy order&quot; and &quot;Copy sig&quot; (or pick from dropdown if same browser). (2) Switch to taker wallet: paste the two hexes in the fields above (or pick from dropdown), then Submit fill.
       </p>
     </div>
   );

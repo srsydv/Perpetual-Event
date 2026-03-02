@@ -189,6 +189,9 @@ export default function Market() {
       <div className="rounded-xl border border-polymarket-border bg-polymarket-card p-6">
         <h1 className="text-xl font-semibold text-white">Binary Market (Polymarket-style)</h1>
         <p className="mt-1 text-gray-500">Market ID: {id}</p>
+        <p className="mt-1 text-xs text-gray-500">
+          Market price comes from the order book (best bid/ask). See the Order book section below for YES/NO %.
+        </p>
         <div className="mt-4 flex gap-8">
           {isResolved && (
             <div>
