@@ -9,7 +9,7 @@
     "verify:sepolia": "hardhat run scripts/verify-sepolia.js --network sepolia"
   },
   "devDependencies": {
-    "@nomicfoundation/hardhat-chai-matchers": "^3.0.0",
+    "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
     "@nomicfoundation/hardhat-verify": "^2.1.3",
     "chai": "^6.2.2",
     "hardhat": "^2.22.0"
